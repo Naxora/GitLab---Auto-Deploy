@@ -1,0 +1,79 @@
+stages:
+  - deploy
+
+DEPLOY_PRD:
+  image: alpine:latest
+  stage: deploy
+
+  variables:
+    # Main PRD app path
+    INVFILEVAR_MAIN_PATH: "/srv/www"
+    
+    # Target PRD server
+    INVFILEVAR_PRD_SERVER: "prd.server.com"
+    
+    # Target PRD server user
+    INVFILEVAR_PRD_USER: "naxora"
+
+    # PRD config path
+    INFILEVAR_PRD_FOLDER: "$INVFILEVAR_MAIN_PATH/classes/PRD/"
+
+    # Theese setting are available in actual repository 'Setting' --> 'Repository' --> 'Deploy tokens'
+    INVFILEVAR_DEPLOY_USER: "deploy_token"
+    INVFILEVAR_DEPLOY_TOKEN: "AxXnrv4kz1Bf7wBARrDfD"
+    
+    ## Username/repository.git
+    INVFILEVAR_REPO: "naxora/myrepo.git"
+
+    ## Create final url
+    INVFILEVAR_BRANCH_URL: "http://$INVFILEVAR_DEPLOY_USER:$INVFILEVAR_DEPLOY_TOKEN@$INVFILEVAR_PRD_SERVER/$INVFILEVAR_REPO"
+
+    # Copy PRD config filename - and how many folder up to want to copy file. '../' 1 folder up, '../../' 2 folder up, etc...
+    INFILEVAR_COPY_PRD_CONF: "db.class.php ../"
+
+  before_script:
+    ## Install required packages
+    - apk apk update && apk add which
+    - which ssh-agent || ( apk update && apk add openssh-client git )
+
+    ## Run ssh-agent (inside the build environment)
+    - eval $(ssh-agent -s)
+
+    ## Add the SSH key stored in SSH_PRIVATE_KEY variable to the agent store
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+
+    ## Create the SSH directory and give it the right permissions
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+
+    ## Use ssh-keyscan to scan the keys of your private server.
+    - ssh-keyscan $INVFILEVAR_PRD_SERVER >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+
+    ## Optionally, if you will be using any Git commands, set the user name and
+    - git config --global user.email "MAIL-HERE"
+    - git config --global user.name "NAME-HERE"
+
+  ## Check PRD server .git is exist. If no command is clone repo. If yes command is checkout master branch
+  ## If repo folder is not exist (defined in $INVFILEVAR_MAIN_PATH variable) the script will be create it
+  ## Warning: If you use an exist repo name that will be makes probles
+  script:
+    - |
+        ssh $PRD_USER@$INVFILEVAR_PRD_SERVER "
+
+        [ ! -d '$INVFILEVAR_MAIN_PATH' ] && echo 'Directory -$INVFILEVAR_MAIN_PATH- does not exists. Now created!' && mkdir $INVFILEVAR_MAIN_PATH
+
+        if [ -d '$INVFILEVAR_MAIN_PATH/.git' ]; then
+          echo 'Git folder is exist. Trying to checkout the latest changes'
+          cd $INVFILEVAR_MAIN_PATH/ && git checkout master && git pull origin master
+
+        else
+          echo 'Git folder is not exist. Trying to git init and checkout the latest changes'
+          cd $INVFILEVAR_MAIN_PATH/ && git init && git remote add origin $INVFILEVAR_BRANCH_URL && git fetch && git checkout -t origin/master
+        fi"
+        
+    - ssh $PRD_USER@$INVFILEVAR_PRD_SERVER "cd $INFILEVAR_PRD_FOLDER && cp $INFILEVAR_COPY_PRD_CONF"
+
+  # Run this script only master push
+  only:
+    - master
